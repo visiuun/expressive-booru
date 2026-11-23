@@ -1,36 +1,27 @@
 package dev.vis.booru.ui.screens
 
 import android.os.Build
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material3.Icon
-import androidx.compose.material3.toShape
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.semantics
-import dev.vis.booru.data.Accent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Label
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.BlurOn
+import androidx.compose.material.icons.rounded.BugReport
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CleaningServices
+import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.ColorLens
-import androidx.compose.material.icons.rounded.Dashboard
 import androidx.compose.material.icons.rounded.DarkMode
+import androidx.compose.material.icons.rounded.Dashboard
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.GridView
@@ -41,12 +32,16 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PlayCircle
+import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.Update
 import androidx.compose.material.icons.rounded.Upload
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -55,16 +50,27 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import dev.vis.booru.BuildConfig
 import dev.vis.booru.Graph
+import dev.vis.booru.data.Accent
 import dev.vis.booru.data.AppSettings
 import dev.vis.booru.data.BackupIo
 import dev.vis.booru.data.Rating
 import dev.vis.booru.data.ThemeMode
+import dev.vis.booru.data.UpdateManager
+import dev.vis.booru.data.Updater
 import dev.vis.booru.ui.Routes
 import dev.vis.booru.ui.components.ConnectedChoice
 import dev.vis.booru.ui.components.SettingsAction
@@ -72,6 +78,7 @@ import dev.vis.booru.ui.components.SettingsBlock
 import dev.vis.booru.ui.components.SettingsGroup
 import dev.vis.booru.ui.components.SettingsSwitch
 import dev.vis.booru.ui.components.SubScreen
+import dev.vis.booru.ui.openUrl
 import dev.vis.booru.ui.toast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -84,6 +91,7 @@ fun SettingsScreen(nav: NavHostController, s: AppSettings) {
     val repo = Graph.settings
     val context = LocalContext.current
     val sources by Graph.sources.items.collectAsState()
+    val updates by UpdateManager.state.collectAsState()
     var blacklist by remember(s.blacklist) { mutableStateOf(s.blacklist) }
     LaunchedEffect(blacklist) { delay(500); if (blacklist != s.blacklist) repo.setBlacklist(blacklist) }
 
@@ -216,12 +224,38 @@ fun SettingsScreen(nav: NavHostController, s: AppSettings) {
             }
         }
         item {
+            SettingsGroup("Updates", m) {
+                SettingsSwitch(
+                    "Check for updates automatically", "Looks for new releases on GitHub when the app starts",
+                    Icons.Rounded.Update, MaterialShapes.Cookie9Sided, 0, 2, s.autoUpdate,
+                ) { scope.launch { repo.setAutoUpdate(it) } }
+                val r = updates.release
+                val progress = updates.progress
+                val status = when {
+                    progress != null -> "Downloading ${(progress * 100).toInt()}%"
+                    updates.checking -> "Checking…"
+                    updates.message != null -> updates.message
+                    else -> "Installed version ${Updater.currentVersion}"
+                }
+                SettingsAction(
+                    if (r != null) "Install version ${r.version}" else "Check for updates", status,
+                    Icons.Rounded.SystemUpdate, MaterialShapes.Flower, 1, 2,
+                ) { if (r != null) UpdateManager.install(context) else UpdateManager.check(context) }
+            }
+        }
+        item {
             SettingsGroup("About", m) {
                 SettingsAction(
                     "Expressive Booru ${BuildConfig.VERSION_NAME}",
                     "Unofficial client for Gelbooru, Danbooru, e621 and Moebooru sites",
-                    Icons.Rounded.Info, MaterialShapes.Circle, 0, 1, onClick = null,
+                    Icons.Rounded.Info, MaterialShapes.Circle, 0, 3, onClick = null,
                 )
+                SettingsAction("Source code", Updater.REPO_URL.removePrefix("https://"), Icons.Rounded.Code, MaterialShapes.Cookie6Sided, 1, 3) {
+                    openUrl(context, Updater.REPO_URL)
+                }
+                SettingsAction("Report a problem", "Opens a new issue on GitHub", Icons.Rounded.BugReport, MaterialShapes.Gem, 2, 3) {
+                    openUrl(context, Updater.REPO_URL + "/issues/new")
+                }
             }
         }
     }

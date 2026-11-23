@@ -60,6 +60,7 @@ data class AppSettings(
     val muted: Boolean = false,
     val activeSourceId: String = Presets.DEFAULT_ID,
     val saveHistory: Boolean = true,
+    val autoUpdate: Boolean = true,
 ) {
     val blacklistTags: Set<String> by lazy {
         blacklist.split(Regex("[\\s,]+")).map { it.trim().lowercase() }.filter { it.isNotEmpty() }.toSet()
@@ -90,6 +91,7 @@ class SettingsRepo(private val context: Context) {
         val muted = booleanPreferencesKey("muted")
         val active = stringPreferencesKey("active_source")
         val history = booleanPreferencesKey("save_history")
+        val autoUpdate = booleanPreferencesKey("auto_update")
     }
 
     val settings: Flow<AppSettings> = context.dataStore.data.map { p ->
@@ -109,6 +111,7 @@ class SettingsRepo(private val context: Context) {
             muted = p[K.muted] ?: false,
             activeSourceId = p[K.active] ?: Presets.DEFAULT_ID,
             saveHistory = p[K.history] ?: true,
+            autoUpdate = p[K.autoUpdate] ?: true,
         )
     }
 
@@ -134,6 +137,7 @@ class SettingsRepo(private val context: Context) {
     suspend fun setMuted(v: Boolean) = context.dataStore.edit { it[K.muted] = v }
     suspend fun setActive(id: String) = context.dataStore.edit { it[K.active] = id }
     suspend fun setSaveHistory(v: Boolean) = context.dataStore.edit { it[K.history] = v }
+    suspend fun setAutoUpdate(v: Boolean) = context.dataStore.edit { it[K.autoUpdate] = v }
 
     suspend fun addToBlacklist(tag: String) = context.dataStore.edit { p ->
         val cur = AppSettings(blacklist = p[K.blacklist] ?: "").blacklistTags

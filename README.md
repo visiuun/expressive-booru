@@ -85,6 +85,7 @@ Tag names use underscores instead of spaces. Each site has its own tag names (`c
 - **Content filters**: choose which ratings you see (General, Sensitive, Questionable, Explicit), blacklist tags, and blur NSFW thumbnails
 - **Open links** from the browser or share them to the app: a post link opens that post, a search link opens that search
 - **Backup**: export and import your favorites, saved searches and custom sites as one file
+- **Automatic updates** straight from this repository's releases
 - **Make it yours**: Material 3 Expressive design with Google Sans Flex, light, dark and **OLED black**, and your **wallpaper colours** (Material You) or one of seven accents
 
 ## Sites
@@ -120,11 +121,16 @@ Danbooru and e621 work the same way: your **username** and the **API key** from 
 2. Open the downloaded file. If Android asks, allow your browser or file manager to **install unknown apps**.
 3. Tap **Install**.
 
+### Updates
+
+The app checks this repository's **Releases** when it starts (at most every 6 hours) and offers new versions in a dialog with what's new. Tap **Update** and Android asks you to confirm the install. The first time, Android asks you to allow Expressive Booru to install apps. You can turn automatic checks off or check by hand in *Settings → Updates*.
+
 ## Privacy
 
 - **No accounts, ads, analytics or trackers.** Favorites, history, downloads and settings stay on your phone.
 - The app only talks to the sites you browse. API keys are stored on your phone, sent only to their own site, and **never** included in backups.
 - Downloads go through Android's own download manager.
+- The update check is a single anonymous request to the public GitHub API, and can be turned off.
 
 ## Compatibility
 

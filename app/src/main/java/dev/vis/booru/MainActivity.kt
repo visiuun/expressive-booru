@@ -14,9 +14,12 @@ import androidx.compose.runtime.setValue
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.navigation.compose.rememberNavController
 import dev.vis.booru.data.AppSettings
+import dev.vis.booru.data.UpdateManager
 import dev.vis.booru.ui.AppNavHost
 import dev.vis.booru.ui.Routes
+import dev.vis.booru.ui.UpdateDialog
 import dev.vis.booru.ui.theme.BooruTheme
+import kotlinx.coroutines.flow.first
 
 class MainActivity : ComponentActivity() {
     private var pendingLink by mutableStateOf<String?>(null)
@@ -31,6 +34,12 @@ class MainActivity : ComponentActivity() {
             BooruTheme(settings) {
                 val nav = rememberNavController()
                 AppNavHost(nav, settings)
+                val update by UpdateManager.state.collectAsState()
+                UpdateDialog(update, onUpdate = { UpdateManager.install(this@MainActivity) }, onLater = UpdateManager::dismiss)
+                LaunchedEffect(Unit) {
+                    val s = Graph.settings.settings.first()
+                    UpdateManager.checkIfDue(this@MainActivity, s.autoUpdate)
+                }
                 val link = pendingLink
                 LaunchedEffect(link) {
                     if (link != null) {
