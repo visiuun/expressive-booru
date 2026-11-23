@@ -128,7 +128,7 @@ fun SettingsScreen(nav: NavHostController, s: AppSettings) {
         }
         item {
             SettingsGroup("Content", m) {
-                SettingsBlock("Ratings", "Filtered on your device", Icons.Rounded.Tune, MaterialShapes.Cookie9Sided, 0, 3) {
+                SettingsBlock("Ratings", "Filtered on your device. Unrated posts only show when all four are on.", Icons.Rounded.Tune, MaterialShapes.Cookie9Sided, 0, 3) {
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(Rating.GENERAL, Rating.SENSITIVE, Rating.QUESTIONABLE, Rating.EXPLICIT).forEach { r ->
                             FilterChip(
@@ -218,7 +218,7 @@ fun SettingsScreen(nav: NavHostController, s: AppSettings) {
                     }
                 }
                 SettingsAction(
-                    "Downloads", "Downloads/Expressive Booru, named [artist] - filename_platform.ext (no artist part when it isn't known)",
+                    "Downloads", "Saved to Downloads/Expressive Booru as [artist] - hash_site.ext, with the post's tags written into the image",
                     Icons.Rounded.FolderOpen, MaterialShapes.Arch, 4, 5, onClick = null,
                 )
             }

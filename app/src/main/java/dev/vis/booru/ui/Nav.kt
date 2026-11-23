@@ -88,6 +88,7 @@ object Routes {
             u.getQueryParameter("page") == "post" && u.getQueryParameter("s") == "view" -> u.getQueryParameter("id")
             segs.size >= 2 && segs[0] == "posts" -> segs[1]
             segs.size >= 3 && segs[0] == "post" && segs[1] == "show" -> segs[2]
+            segs.size == 2 && segs[0] == "post" && segs[1].endsWith(".html") -> segs[1].removeSuffix(".html") // nozomi.la
             else -> null
         }?.toLongOrNull()
         if (id != null) {

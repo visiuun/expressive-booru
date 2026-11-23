@@ -14,6 +14,7 @@ import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.crossfade
 import dev.vis.booru.data.BooruApi
 import dev.vis.booru.data.DownloadLog
+import dev.vis.booru.data.SavedDownloads
 import dev.vis.booru.data.FavoritesRepo
 import dev.vis.booru.data.SearchesRepo
 import dev.vis.booru.data.SettingsRepo
@@ -31,12 +32,13 @@ object Graph {
 class BooruApp : Application(), SingletonImageLoader.Factory {
     override fun onCreate() {
         super.onCreate()
-        Graph.api = BooruApi(this)
+        Graph.api = BooruApi(cacheDir)
         Graph.settings = SettingsRepo(this)
         Graph.sources = SourcesRepo(this)
         Graph.favorites = FavoritesRepo(this)
         Graph.searches = SearchesRepo(this)
         Graph.downloadLog = DownloadLog(this)
+        SavedDownloads.sweep(this)
     }
 
     override fun newImageLoader(context: PlatformContext): ImageLoader =

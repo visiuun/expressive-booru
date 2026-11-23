@@ -11,10 +11,11 @@ enum class ApiType(val label: String) {
     GELBOORU("Gelbooru 0.2"),
     DANBOORU("Danbooru"),
     E621("e621"),
-    MOEBOORU("Moebooru");
+    MOEBOORU("Moebooru"),
+    NOZOMI("Nozomi");
 
-    /** Meta tag that sorts by score / randomly on this API family. */
-    val scoreSort get() = if (this == GELBOORU) "sort:score" else "order:score"
+    /** Meta tag that sorts by score / randomly on this API family (Nozomi only knows "popular"). */
+    val scoreSort get() = when (this) { GELBOORU -> "sort:score"; NOZOMI -> "order:popular"; else -> "order:score" }
     val randomSort get() = if (this == GELBOORU) "sort:random" else "order:random"
 
     /** e621 refuses autocomplete for fewer than 3 characters. */
@@ -22,7 +23,7 @@ enum class ApiType(val label: String) {
 
     val userLabel get() = when (this) {
         GELBOORU -> "User ID"
-        DANBOORU, E621, MOEBOORU -> "Username"
+        DANBOORU, E621, MOEBOORU, NOZOMI -> "Username"
     }
     val keyLabel get() = when (this) {
         MOEBOORU -> "Password hash"
@@ -75,6 +76,7 @@ data class Source(
         ApiType.GELBOORU -> "$web/index.php?page=post&s=view&id=$id"
         ApiType.DANBOORU, ApiType.E621 -> "$web/posts/$id"
         ApiType.MOEBOORU -> "$web/post/show/$id"
+        ApiType.NOZOMI -> "$web/post/$id.html"
     }
 
     /** Where to get an API key for this site, if we know. */
@@ -165,6 +167,7 @@ object Presets {
         Source("xbooru", "Xbooru", ApiType.GELBOORU, "https://xbooru.com"),
         Source("tbib", "TBIB", ApiType.GELBOORU, "https://tbib.org"),
         Source("hypnohub", "HypnoHub", ApiType.GELBOORU, "https://hypnohub.net"),
+        Source("nozomi", "Nozomi", ApiType.NOZOMI, "https://j.gold-usergeneratedcontent.net", "https://nozomi.la"),
     )
     const val DEFAULT_ID = "rule34"
 }

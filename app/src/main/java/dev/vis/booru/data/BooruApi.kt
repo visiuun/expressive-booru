@@ -1,6 +1,5 @@
 package dev.vis.booru.data
 
-import android.content.Context
 import dev.vis.booru.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -15,6 +14,7 @@ import okhttp3.Cache
 import okhttp3.Credentials
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.io.File
 import java.io.IOException
 import java.net.URLEncoder
 import java.text.SimpleDateFormat
@@ -25,17 +25,21 @@ import java.util.concurrent.TimeUnit
 val AppJson = Json { ignoreUnknownKeys = true; isLenient = true; explicitNulls = false; coerceInputValues = true }
 
 /** Talks to every supported booru API and maps the responses to [Post]. */
-class BooruApi(context: Context) {
+class BooruApi(cacheDir: File) {
 
     val userAgent = "ExpressiveBooru/${BuildConfig.VERSION_NAME} (by anonymous)"
 
     val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(40, TimeUnit.SECONDS)
-        .cache(Cache(context.cacheDir.resolve("http"), 32L * 1024 * 1024))
+        .cache(Cache(cacheDir.resolve("http"), 32L * 1024 * 1024))
         .addInterceptor { chain ->
             val req = chain.request()
-            chain.proceed(if (req.header("User-Agent") == null) req.newBuilder().header("User-Agent", userAgent).build() else req)
+            val b = req.newBuilder()
+            if (req.header("User-Agent") == null) b.header("User-Agent", userAgent)
+            // Nozomi's image hosts only answer requests that come from nozomi.la.
+            if (req.header("Referer") == null && req.url.host.endsWith(NOZOMI_CDN)) b.header("Referer", "https://nozomi.la/")
+            chain.proceed(b.build())
         }
         .build()
 
@@ -45,7 +49,8 @@ class BooruApi(context: Context) {
             ApiType.GELBOORU -> "${source.apiUrl}/index.php?page=dapi&s=post&q=index&json=1&limit=$limit&pid=$page&tags=$q&fields=tag_info" + gelAuth(source)
             ApiType.DANBOORU -> "${source.apiUrl}/posts.json?limit=$limit&page=${page + 1}&tags=$q" + danAuth(source)
             ApiType.E621 -> "${source.apiUrl}/posts.json?limit=$limit&page=${page + 1}&tags=$q"
-            ApiType.MOEBOORU -> "${source.apiUrl}/post.json?limit=$limit&page=${page + 1}&tags=$q" + moeAuth(source)
+            ApiType.MOEBOORU -> "${source.apiUrl}/post.json?api_version=2&include_tags=1&limit=$limit&page=${page + 1}&tags=$q" + moeAuth(source)
+            ApiType.NOZOMI -> return nozomi.posts(source, tags, page, limit)
         }
         val body = get(source, url)
         return when (source.type) {
@@ -53,8 +58,11 @@ class BooruApi(context: Context) {
             ApiType.DANBOORU -> parseDanbooru(source, body)
             ApiType.E621 -> parseE621(source, body)
             ApiType.MOEBOORU -> parseMoebooru(source, body)
+            ApiType.NOZOMI -> emptyList()
         }
     }
+
+    private val nozomi = Nozomi(this)
 
     suspend fun autocomplete(source: Source, term: String): List<TagSuggestion> {
         val t = term.trim()
@@ -69,6 +77,7 @@ class BooruApi(context: Context) {
             ApiType.DANBOORU -> "${source.apiUrl}/autocomplete.json?search%5Bquery%5D=$q&search%5Btype%5D=tag_query&limit=12"
             ApiType.E621 -> "${source.apiUrl}/tags/autocomplete.json?search%5Bname_matches%5D=$q&expiry=7"
             ApiType.MOEBOORU -> "${source.apiUrl}/tag.json?name=$q*&order=count&limit=12"
+            ApiType.NOZOMI -> return nozomi.autocomplete(t)
         }
         val root = runCatching { AppJson.parseToJsonElement(get(source, url)) }.getOrNull() as? JsonArray ?: return emptyList()
         return root.mapNotNull { it as? JsonObject }.mapNotNull { o ->
@@ -84,11 +93,12 @@ class BooruApi(context: Context) {
                 }
                 ApiType.E621 -> TagSuggestion(o.str("name") ?: return@mapNotNull null, o.int("post_count"), e621Category(o.int("category")))
                 ApiType.MOEBOORU -> TagSuggestion(o.str("name") ?: return@mapNotNull null, o.int("count"), moeCategory(o.int("type")))
+                ApiType.NOZOMI -> null
             }
         }
     }
 
-    private suspend fun get(source: Source, url: String): String = withContext(Dispatchers.IO) {
+    internal suspend fun get(source: Source, url: String): String = withContext(Dispatchers.IO) {
         val b = Request.Builder().url(url).header("Accept", "application/json")
         if (source.type == ApiType.E621) {
             val who = source.user.ifBlank { "anonymous" }
@@ -210,43 +220,125 @@ class BooruApi(context: Context) {
         }.toMap().ifEmpty { null }
     }
 
-    private fun groupTags(tags: List<String>, types: Map<String, TagCategory>): Map<TagCategory, List<String>> =
+    internal fun groupTags(tags: List<String>, types: Map<String, TagCategory>): Map<TagCategory, List<String>> =
         tags.groupBy { types[it] ?: types[it.lowercase()] ?: TagCategory.GENERAL }.toSortedMap(compareBy { it.ordinal })
 
-    // Gelbooru.com has no tag_info, so types come from its tag API. Shared across searches; LRU-bounded.
+    // Tag types looked up from a site, keyed "sourceId:tag". Shared across searches; LRU-bounded.
     private val tagTypeCache = object : LinkedHashMap<String, TagCategory>(512, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, TagCategory>) = size > 20_000
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, TagCategory>) = size > 30_000
     }
 
-    private fun needsTypeLookup(source: Source) = source.type == ApiType.GELBOORU && source.host.contains("gelbooru.com")
-
     /**
-     * Fills in tag categories (so the artist is known) for posts that arrived as flat tag lists.
-     * Known tags come from the cache; the rest are fetched 100 at a time. Posts that already have
-     * categories, or come from sites without a tag API, are returned unchanged.
+     * Fills in tag categories (so the artist is known) for posts that arrived as flat tag lists:
+     *  - Gelbooru.com: its tag API, 100 names per request.
+     *  - e621 / e926: `tags.json`, 100 names per request.
+     *  - Other Gelbooru-type sites without `tag_info` (TBIB, HypnoHub…): the post page's tag list.
+     * Known tags come from the cache. Posts that already have categories are returned unchanged.
      */
     suspend fun withTagTypes(source: Source, posts: List<Post>): List<Post> {
-        if (!needsTypeLookup(source) || posts.none { it.tagGroups == null }) return posts
-        val wanted = posts.filter { it.tagGroups == null }.flatMap { it.tags }.map { it.lowercase() }.toSet()
-        val missing = synchronized(tagTypeCache) { wanted.filter { it !in tagTypeCache } }
-        for (chunk in missing.chunked(100)) {
-            val url = "${source.apiUrl}/index.php?page=dapi&s=tag&q=index&json=1&limit=100&names=${enc(chunk.joinToString(" "))}" + gelAuth(source)
-            val root = runCatching { AppJson.parseToJsonElement(get(source, url)) }.getOrNull()
-            val entries = when (root) {
-                is JsonObject -> (root["tag"] as? JsonArray) ?: (root["tag"] as? JsonObject)?.let { JsonArray(listOf(it)) }
-                is JsonArray -> root
-                else -> null
-            } ?: continue
-            synchronized(tagTypeCache) {
-                entries.mapNotNull { it as? JsonObject }.forEach { e ->
-                    val name = e.str("name")?.lowercase() ?: return@forEach
-                    tagTypeCache[name] = gelCategory(e.str("type")) ?: TagCategory.GENERAL
+        val typed = siteTagTypes(source, posts)
+        // Safebooru, TBIB and other Danbooru mirrors often lack (or mistype) artist tags; Danbooru knows them by md5.
+        return if (source.type == ApiType.GELBOORU) runCatching { artistsFromDanbooru(typed) }.getOrDefault(typed) else typed
+    }
+
+    private suspend fun siteTagTypes(source: Source, posts: List<Post>): List<Post> {
+        val flat = posts.filter { it.tagGroups == null }
+        if (flat.isEmpty()) return posts
+        return when {
+            source.type == ApiType.GELBOORU && source.host.contains("gelbooru.com") -> {
+                val types = lookupTypes(source, flat) { chunk ->
+                    val url = "${source.apiUrl}/index.php?page=dapi&s=tag&q=index&json=1&limit=100&names=${enc(chunk.joinToString(" "))}" + gelAuth(source)
+                    val root = AppJson.parseToJsonElement(get(source, url))
+                    val entries = when (root) {
+                        is JsonObject -> (root["tag"] as? JsonArray) ?: (root["tag"] as? JsonObject)?.let { JsonArray(listOf(it)) }
+                        is JsonArray -> root
+                        else -> null
+                    }
+                    entries.orEmpty().mapNotNull { it as? JsonObject }.mapNotNull { e ->
+                        e.str("name")?.lowercase()?.let { it to (gelCategory(e.str("type")) ?: TagCategory.GENERAL) }
+                    }
                 }
-                chunk.forEach { if (it !in tagTypeCache) tagTypeCache[it] = TagCategory.GENERAL }
+                posts.map { p -> if (p.tagGroups != null) p else p.copy(tagGroups = groupTags(p.tags, types)) }
+            }
+            source.type == ApiType.E621 -> {
+                val types = lookupTypes(source, flat) { chunk ->
+                    val url = "${source.apiUrl}/tags.json?limit=320&search%5Bname%5D=${enc(chunk.joinToString(","))}"
+                    (AppJson.parseToJsonElement(get(source, url)) as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }.mapNotNull { e ->
+                        e.str("name")?.lowercase()?.let { it to (e621Category(e.int("category")) ?: TagCategory.GENERAL) }
+                    }
+                }
+                posts.map { p -> if (p.tagGroups != null) p else p.copy(tagGroups = groupTags(p.tags, types)) }
+            }
+            source.type == ApiType.GELBOORU -> posts.map { p ->
+                if (p.tagGroups != null) p else runCatching { pageTagTypes(source, p) }.getOrNull()?.let { p.copy(tagGroups = groupTags(p.tags, it)) } ?: p
+            }
+            else -> posts
+        }
+    }
+
+    private val danbooruArtists = object : LinkedHashMap<String, Triple<List<String>, List<String>, List<String>>>(256, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Triple<List<String>, List<String>, List<String>>>) = size > 5_000
+    }
+
+    /** Fills artist / character / copyright groups from Danbooru for posts with an md5 but no artist, 40 per request. */
+    private suspend fun artistsFromDanbooru(posts: List<Post>): List<Post> {
+        val danbooru = Presets.all.first { it.type == ApiType.DANBOORU }
+        val need = posts.filter { it.artists.isEmpty() && it.md5?.matches(MD5) == true }.map { it.md5!!.lowercase() }.distinct()
+        val missing = synchronized(danbooruArtists) { need.filter { it !in danbooruArtists } }
+        for (chunk in missing.chunked(40)) {
+            val url = "${danbooru.apiUrl}/posts.json?limit=100&only=md5,tag_string_artist,tag_string_character,tag_string_copyright&tags=md5:${chunk.joinToString(",")}"
+            val arr = AppJson.parseToJsonElement(get(danbooru, url)) as? JsonArray ?: continue
+            synchronized(danbooruArtists) {
+                arr.mapNotNull { it as? JsonObject }.forEach { o ->
+                    val md5 = o.str("md5")?.lowercase() ?: return@forEach
+                    danbooruArtists[md5] = Triple(splitTags(o.str("tag_string_artist")), splitTags(o.str("tag_string_character")), splitTags(o.str("tag_string_copyright")))
+                }
+                chunk.forEach { if (it !in danbooruArtists) danbooruArtists[it] = Triple(emptyList(), emptyList(), emptyList()) }
             }
         }
-        val types = synchronized(tagTypeCache) { wanted.associateWith { tagTypeCache[it] ?: TagCategory.GENERAL } }
-        return posts.map { p -> if (p.tagGroups != null) p else p.copy(tagGroups = groupTags(p.tags, types)) }
+        return posts.map { p ->
+            val hit = p.md5?.lowercase()?.let { synchronized(danbooruArtists) { danbooruArtists[it] } }
+            if (hit == null || p.artists.isNotEmpty() || hit.first.isEmpty()) p else {
+                val (artists, characters, copyrights) = hit
+                val known = (artists + characters + copyrights).toSet()
+                val rest = (p.tagGroups ?: mapOf(TagCategory.GENERAL to p.tags)).mapValues { (_, v) -> v.filterNot { it in known } }
+                val merged = rest + mapOf(TagCategory.ARTIST to artists, TagCategory.CHARACTER to characters, TagCategory.COPYRIGHT to copyrights)
+                p.copy(tagGroups = merged.filterValues { it.isNotEmpty() }.toSortedMap(compareBy { it.ordinal }))
+            }
+        }
+    }
+
+    /** Cached batch lookup: fetches only unknown tags, 100 per call; tags the site doesn't return count as general. */
+    private suspend fun lookupTypes(
+        source: Source,
+        posts: List<Post>,
+        fetch: suspend (List<String>) -> List<Pair<String, TagCategory>>,
+    ): Map<String, TagCategory> {
+        fun key(t: String) = "${source.id}:$t"
+        val wanted = posts.flatMap { it.tags }.map { it.lowercase() }.toSet()
+        val missing = synchronized(tagTypeCache) { wanted.filter { key(it) !in tagTypeCache } }
+        for (chunk in missing.chunked(100)) {
+            val found = runCatching { fetch(chunk) }.getOrNull() ?: continue
+            synchronized(tagTypeCache) {
+                found.forEach { (name, cat) -> tagTypeCache[key(name)] = cat }
+                chunk.forEach { if (key(it) !in tagTypeCache) tagTypeCache[key(it)] = TagCategory.GENERAL }
+            }
+        }
+        return synchronized(tagTypeCache) { wanted.associateWith { tagTypeCache[key(it)] ?: TagCategory.GENERAL } }
+    }
+
+    /** Gelbooru post pages list every tag as `<li class="tag-type-artist tag">… tags=name">`. */
+    private suspend fun pageTagTypes(source: Source, post: Post): Map<String, TagCategory>? {
+        val html = withContext(Dispatchers.IO) {
+            client.newCall(Request.Builder().url("${source.web}/index.php?page=post&s=view&id=${post.id}").build()).execute().use { r ->
+                if (!r.isSuccessful) null else r.body?.string()
+            }
+        } ?: return null
+        val types = HTML_TAG_ITEM.findAll(html).mapNotNull { m ->
+            val name = HTML_TAG_LINK.find(m.groupValues[2])?.groupValues?.get(1)?.let { java.net.URLDecoder.decode(it, "UTF-8") } ?: return@mapNotNull null
+            name.lowercase() to (gelCategory(m.groupValues[1]) ?: TagCategory.GENERAL)
+        }.toMap()
+        return types.ifEmpty { null }
     }
 
     private fun parseGelDate(s: String): Long? =
@@ -372,7 +464,11 @@ class BooruApi(context: Context) {
     }
 
     private fun parseMoebooru(src: Source, body: String): List<Post> {
-        val arr = parseRoot(body) as? JsonArray ?: return emptyList()
+        // API v2 wraps posts as {"posts": [...], "tags": {"name": "artist", ...}}; v1 is a bare array.
+        val root = parseRoot(body)
+        val arr = (root as? JsonArray) ?: ((root as? JsonObject)?.get("posts") as? JsonArray) ?: return emptyList()
+        val types: Map<String, TagCategory> = ((root as? JsonObject)?.get("tags") as? JsonObject)
+            ?.mapValues { (_, v) -> moeTypeName((v as? JsonPrimitive)?.contentOrNull) }.orEmpty()
         return arr.mapNotNull { it as? JsonObject }.mapNotNull { o ->
             val id = o.long("id") ?: return@mapNotNull null
             val file = absolute(src, o.str("file_url"))
@@ -387,6 +483,7 @@ class BooruApi(context: Context) {
                 rating = when (o.str("rating")) { "s" -> Rating.GENERAL; "q" -> Rating.QUESTIONABLE; "e" -> Rating.EXPLICIT; else -> Rating.UNKNOWN },
                 score = o.int("score"),
                 tags = splitTags(o.str("tags")),
+                tagGroups = splitTags(o.str("tags")).takeIf { types.isNotEmpty() }?.let { groupTags(it, types) },
                 source = o.str("source"), md5 = o.str("md5"), ext = o.str("file_ext"),
                 fileSize = o.long("file_size"), createdAt = o.long("created_at"),
             )
@@ -394,6 +491,11 @@ class BooruApi(context: Context) {
     }
 
     private fun moeAuth(s: Source) = if (s.hasAuth) "&login=${enc(s.user)}&password_hash=${enc(s.apiKey)}" else ""
+
+    private fun moeTypeName(t: String?) = when (t) {
+        "artist" -> TagCategory.ARTIST; "copyright" -> TagCategory.COPYRIGHT; "character" -> TagCategory.CHARACTER
+        "general" -> TagCategory.GENERAL; "faults", "meta" -> TagCategory.META; else -> TagCategory.OTHER
+    }
 
     private fun moeCategory(c: Int?) = when (c) {
         0 -> TagCategory.GENERAL; 1 -> TagCategory.ARTIST; 3 -> TagCategory.COPYRIGHT
@@ -413,7 +515,11 @@ class BooruApi(context: Context) {
 
     companion object {
         const val PAGE_SIZE = 40
+        const val NOZOMI_CDN = "gold-usergeneratedcontent.net"
+        private val MD5 = Regex("[0-9a-fA-F]{32}")
         private val XML_REASON = Regex("reason=\"([^\"]*)\"")
+        private val HTML_TAG_ITEM = Regex("<li class=\"tag-type-([a-z]+)[^\"]*\">(.*?)</li>", RegexOption.DOT_MATCHES_ALL)
+        private val HTML_TAG_LINK = Regex("[?&;]tags=([^\"&]+)\"")
         private val COUNT_IN_LABEL = Regex("\\((\\d+)\\)\\s*$")
         fun enc(s: String): String = URLEncoder.encode(s, "UTF-8")
     }

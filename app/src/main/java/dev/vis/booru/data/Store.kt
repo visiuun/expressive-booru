@@ -44,6 +44,8 @@ enum class Accent(val label: String, val seed: Long) {
     TEAL("Teal", 0xFF1E9C9C),
 }
 
+private val RATED = listOf(Rating.GENERAL, Rating.SENSITIVE, Rating.QUESTIONABLE, Rating.EXPLICIT)
+
 data class AppSettings(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val oled: Boolean = false,
@@ -68,7 +70,9 @@ data class AppSettings(
 
     /** Client-side filter: rating allowlist + blacklisted tags. Applied to every feed. */
     fun allows(p: Post): Boolean {
-        if (p.rating != Rating.UNKNOWN && p.rating !in ratings) return false
+        // Unrated posts (Nozomi, some custom sites) can't be checked, so they only show when every rating is allowed.
+        if (p.rating == Rating.UNKNOWN) { if (!ratings.containsAll(RATED)) return false }
+        else if (p.rating !in ratings) return false
         if (blacklistTags.isEmpty()) return true
         return p.tags.none { it.lowercase() in blacklistTags }
     }
@@ -183,6 +187,15 @@ open class JsonListStore<T>(
 class SourcesRepo(context: Context) : JsonListStore<Source>(
     File(context.filesDir, "sources.json"), Source.serializer(), { Presets.all },
 ) {
+    init {
+        // Built-in sites added in later versions show up for existing users too, once.
+        val prefs = context.getSharedPreferences("sources_meta", Context.MODE_PRIVATE)
+        val known = prefs.getStringSet("known_presets", null) ?: items.value.map { it.id }.toSet()
+        val fresh = Presets.all.filter { it.id !in known && items.value.none { s -> s.id == it.id } }
+        if (fresh.isNotEmpty()) update { it + fresh }
+        prefs.edit().putStringSet("known_presets", Presets.all.map { it.id }.toSet()).apply()
+    }
+
     fun get(id: String): Source? = items.value.firstOrNull { it.id == id }
 
     /** Like [get], but also knows the Everything pseudo-site. */

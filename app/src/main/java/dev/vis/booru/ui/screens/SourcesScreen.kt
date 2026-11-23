@@ -208,6 +208,7 @@ fun SourceEditScreen(nav: NavHostController, id: String) {
                     ApiType.DANBOORU -> "Optional. Your username and an API key from your profile. Lifts the 2-tag search limit if your account allows."
                     ApiType.E621 -> "Optional. Your username and API key (Account → Manage API Access). Needed for some posts that are hidden when logged out."
                     ApiType.MOEBOORU -> "Optional. Your username and password hash."
+                    ApiType.NOZOMI -> "Nozomi has no accounts; nothing to fill in."
                 },
                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

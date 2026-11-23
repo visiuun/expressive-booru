@@ -22,8 +22,8 @@ android {
         applicationId = "dev.vis.expressivebooru"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.1.1"
+        versionCode = 4
+        versionName = "1.2.0"
         vectorDrawables.useSupportLibrary = true
     }
 
@@ -53,6 +53,11 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+        unitTests.isReturnDefaultValues = true
     }
 
     buildFeatures {
@@ -109,4 +114,6 @@ dependencies {
     implementation("androidx.media3:media3-datasource-okhttp:1.7.1")
 
     implementation("me.saket.telephoto:zoomable-image-coil3:0.16.0")
+
+    testImplementation("junit:junit:4.13.2")
 }

@@ -3,7 +3,7 @@ package dev.vis.booru.data
 import android.app.DownloadManager
 import android.content.Context
 import android.net.Uri
-import android.os.Environment
+import java.io.File
 import android.widget.Toast
 import dev.vis.booru.Graph
 import kotlinx.coroutines.CancellationException
@@ -20,7 +20,7 @@ import kotlinx.coroutines.launch
 
 /**
  * Saves originals through the system DownloadManager into Downloads/Expressive Booru.
- * Name: "[artist] - <original filename>_<platform>.<ext>", or just "<original filename>_<platform>.<ext>"
+ * Name: "[artist] - <md5>_<platform>.<ext>", or just "<md5>_<platform>.<ext>"
  * when the site can't tell which tag is the artist (TBIB, HypnoHub). A single-tag bulk download passes
  * its tag as the artist for those.
  */
@@ -30,7 +30,9 @@ object Downloader {
         val platform = (source?.name ?: post.sourceId).lowercase().replace(Regex("[^a-z0-9]"), "").ifBlank { "booru" }
         val original = java.net.URLDecoder.decode(url.substringBefore('?').substringAfterLast('/'), "UTF-8")
         val ext = original.substringAfterLast('.', "").ifBlank { post.extension.ifBlank { "jpg" } }
-        val base = sanitize(original.substringBeforeLast('.', original)).ifBlank { post.md5 ?: post.id.toString() }
+        // The file's hash keeps names short and stable; some sites (yande.re, Konachan) put every tag in the URL's filename.
+        val base = post.md5?.takeIf { it.isNotBlank() }?.let(::sanitize)
+            ?: sanitize(original.substringBeforeLast('.', original)).ifBlank { post.id.toString() }
         val artist = post.artists.take(2).joinToString(", ") { sanitize(it) }
             .ifBlank { artistHint?.let(::sanitize).orEmpty() }
         val name = "${base}_$platform.$ext"
@@ -46,25 +48,38 @@ object Downloader {
         val url = post.fileUrl ?: post.videoUrl ?: post.sampleUrl ?: throw IllegalStateException("This post has no downloadable file")
         val dm = app.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
         val name = fileName(post, source, url, artistHint)
+        // Lands in the app's folder first so the tags can be written in, then moves to Downloads (see SavedDownloads).
+        val incoming = SavedDownloads.incomingDir(app) ?: throw IllegalStateException("Storage isn't available")
         val req = DownloadManager.Request(Uri.parse(url))
             .setTitle(name)
             .setDescription("Expressive Booru download")
-            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
             .setAllowedOverMetered(true)
             .setAllowedOverRoaming(true)
             .addRequestHeader("User-Agent", Graph.api.userAgent)
-            .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "Expressive Booru/$name")
+            .setDestinationUri(Uri.fromFile(File(incoming, "${System.nanoTime()}_$name")))
         source?.let { req.addRequestHeader("Referer", it.web + "/") }
-        dm.enqueue(req)
+        val id = dm.enqueue(req)
+        val artists = post.artists.ifEmpty { listOfNotNull(artistHint) }
+        SavedDownloads.remember(app, id, PendingDownload(name, post.tags, artists, source?.postPageUrl(post.id)))
         Graph.downloadLog.add(post)
         return name
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
+    /** Set by the activity: asks for the notification (Android 13+) or storage (Android 8–9) permission. */
+    var askPermissions: (() -> Unit)? = null
+    private var asked = false
+
+    fun requestPermissionsOnce() {
+        if (!asked) { asked = true; askPermissions?.invoke() }
+    }
+
     /** Looks up the post's tag types first where the site only gives flat tags, so the artist is in the name. */
     fun download(context: Context, post: Post) {
         val app = context.applicationContext
+        requestPermissionsOnce()
         scope.launch {
             val typed = Graph.sources.get(post.sourceId)
                 ?.let { s -> runCatching { Graph.api.withTagTypes(s, listOf(post)).first() }.getOrNull() } ?: post
@@ -110,6 +125,7 @@ object BulkDownloader {
     fun start(context: Context, source: Source, query: String) {
         if (running) return
         val app = context.applicationContext
+        Downloader.requestPermissionsOnce()
         val hint = artistHint(query)
         _state.value = Progress(source.id, query)
         job = scope.launch {

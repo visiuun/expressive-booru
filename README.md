@@ -5,7 +5,7 @@
 # Expressive Booru
 
 **A fast, private booru client for Android, built with Material 3 Expressive.**
-Rule34, Gelbooru, Danbooru, e621, yande.re, Konachan and more, in one app. No ads, no tracking, no account needed.
+Rule34, Gelbooru, Danbooru, e621, yande.re, Konachan, Nozomi and more, in one app. No ads, no tracking, no account needed.
 
 [![Latest release](https://img.shields.io/github/v/release/visiuun/expressive-booru?style=flat-square&label=download&color=2e9e5b)](https://github.com/visiuun/expressive-booru/releases/latest)
 [![Android 8.0+](https://img.shields.io/badge/Android-8.0%2B-3ddc84?style=flat-square&logo=android&logoColor=white)](#compatibility)
@@ -73,16 +73,18 @@ Tag names use underscores instead of spaces. Each site has its own tag names (`c
   </tr>
 </table>
 
-- **Every major booru in one app**: Rule34, Gelbooru, Safebooru, Danbooru, e621, e926, yande.re, Konachan, Xbooru, TBIB and HypnoHub built in, plus **any other site** running Gelbooru, Danbooru, e621 or Moebooru software
+- **Every major booru in one app**: Rule34, Gelbooru, Safebooru, Danbooru, e621, e926, yande.re, Konachan, Xbooru, TBIB, HypnoHub and Nozomi built in, plus **any other site** running Gelbooru, Danbooru, e621 or Moebooru software
 - **Everything**: browse or search **all your sites at once**. Results are mixed together and duplicates (the same image posted to several sites) are removed
 - **Tag search with suggestions** as you type, with post counts and colours for artists, characters, series, species and meta tags. Exclude tags with `-`, sort by newest, top score or random
 - **A grid that keeps each image's shape**, 1 to 5 columns, and endless scrolling. Long-press any thumbnail to favorite it
 - **Full-screen viewer**: swipe through results (more load as you go), pinch and double-tap to zoom, **GIFs** and **videos** (webm, mp4) play inline, full-resolution or resized images
 - **Post details**: score, size, date, source link and tags grouped by type. Tap a tag to search it, or long-press it to add it to the current search, exclude it, blacklist it or copy it
-- **Download** single posts or **download everything** from a search (up to 3,000 posts), straight to your Downloads folder, named `[artist] - filename_site.ext` (just `filename_site.ext` when the site doesn't say who the artist is). Already downloaded posts are skipped next time
+- **Download** single posts or **download everything** from a search (up to 3,000 posts), straight to your Downloads folder, named `[artist] - hash_site.ext`. Already downloaded posts are skipped next time
+- **Tags travel with the file**: every downloaded JPEG, PNG and WebP gets the post's tags, artist and link written into its EXIF and XMP metadata, so they show up as *Tags* in Windows and in photo apps like Lightroom, digiKam or Immich. The image itself isn't re-encoded
+- **The artist is always found**: tags are sorted into artist, character, series and general on every site, even where the site's own API doesn't say (it looks them up, or asks Danbooru for mirrored posts)
 - **Favorites** across every site, kept on your phone, filterable by site and tags
 - **Saved searches** and search history
-- **Content filters**: choose which ratings you see (General, Sensitive, Questionable, Explicit), blacklist tags, and blur NSFW thumbnails
+- **Content filters**: choose which ratings you see (General, Sensitive, Questionable, Explicit), blacklist tags, and blur NSFW thumbnails. Sites without ratings (Nozomi) only show when all four ratings are on
 - **Open links** from the browser or share them to the app: a post link opens that post, a search link opens that search
 - **Backup**: export and import your favorites, saved searches and custom sites as one file
 - **Automatic updates** straight from this repository's releases
@@ -99,6 +101,7 @@ Tag names use underscores instead of spaces. Each site has its own tag names (`c
 | **e621** / **e926** | e621 | No (an API key shows posts hidden from guests) |
 | **yande.re**, **Konachan** | Moebooru | No |
 | **Xbooru**, **TBIB**, **HypnoHub** | Gelbooru 0.2 | No |
+| **Nozomi** (nozomi.la) | Nozomi | No (posts have no rating) |
 
 Sites that need a key are left out of **Everything** until you add one.
 

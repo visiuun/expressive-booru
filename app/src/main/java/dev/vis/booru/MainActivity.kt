@@ -1,19 +1,25 @@
 package dev.vis.booru
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.navigation.compose.rememberNavController
 import dev.vis.booru.data.AppSettings
+import dev.vis.booru.data.Downloader
 import dev.vis.booru.data.UpdateManager
 import dev.vis.booru.ui.AppNavHost
 import dev.vis.booru.ui.Routes
@@ -29,6 +35,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         if (savedInstanceState == null) pendingLink = linkFrom(intent)
+        val permissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { }
+        Downloader.askPermissions = {
+            val needed = buildList {
+                if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
+                if (Build.VERSION.SDK_INT < 29) add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            }.filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
+            if (needed.isNotEmpty()) permissions.launch(needed.toTypedArray())
+        }
         setContent {
             val settings by Graph.settings.settings.collectAsState(initial = AppSettings())
             BooruTheme(settings) {
