@@ -218,7 +218,7 @@ fun SettingsScreen(nav: NavHostController, s: AppSettings) {
                     }
                 }
                 SettingsAction(
-                    "Downloads", "Downloads/Expressive Booru, named [artist] - filename_platform.ext",
+                    "Downloads", "Downloads/Expressive Booru, named [artist] - filename_platform.ext (no artist part when it isn't known)",
                     Icons.Rounded.FolderOpen, MaterialShapes.Arch, 4, 5, onClick = null,
                 )
             }

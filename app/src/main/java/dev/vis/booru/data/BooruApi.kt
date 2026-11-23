@@ -42,7 +42,7 @@ class BooruApi(context: Context) {
     suspend fun posts(source: Source, tags: String, page: Int, limit: Int = PAGE_SIZE): List<Post> {
         val q = enc(tags.trim())
         val url = when (source.type) {
-            ApiType.GELBOORU -> "${source.apiUrl}/index.php?page=dapi&s=post&q=index&json=1&limit=$limit&pid=$page&tags=$q" + gelAuth(source)
+            ApiType.GELBOORU -> "${source.apiUrl}/index.php?page=dapi&s=post&q=index&json=1&limit=$limit&pid=$page&tags=$q&fields=tag_info" + gelAuth(source)
             ApiType.DANBOORU -> "${source.apiUrl}/posts.json?limit=$limit&page=${page + 1}&tags=$q" + danAuth(source)
             ApiType.E621 -> "${source.apiUrl}/posts.json?limit=$limit&page=${page + 1}&tags=$q"
             ApiType.MOEBOORU -> "${source.apiUrl}/post.json?limit=$limit&page=${page + 1}&tags=$q" + moeAuth(source)
@@ -163,13 +163,16 @@ class BooruApi(context: Context) {
             val sample = absolute(src, o.str("sample_url"))?.takeIf { hasSample != false } ?: (if (hasSample == true) built("samples/$dir/sample_$stem.jpg") else null)
             val preview = absolute(src, o.str("preview_url")) ?: built("thumbnails/$dir/thumbnail_$stem.jpg")
             if (file == null && preview == null) return@mapNotNull null
+            val tags = splitTags(o.str("tags"))
+            val groups = gelTagInfo(o["tag_info"])?.let { groupTags(tags, it) }
             Post(
                 sourceId = src.id, id = id,
                 previewUrl = preview, sampleUrl = sample, fileUrl = file,
                 width = o.int("width") ?: 0, height = o.int("height") ?: 0,
                 rating = gelRating(o.str("rating")),
                 score = o.int("score"),
-                tags = splitTags(o.str("tags")),
+                tags = tags,
+                tagGroups = groups,
                 source = o.str("source"),
                 md5 = o.str("md5") ?: o.str("hash"),
                 ext = image?.substringAfterLast('.', "")?.ifBlank { null } ?: file?.substringBefore('?')?.substringAfterLast('.'),
@@ -189,13 +192,61 @@ class BooruApi(context: Context) {
     }
 
     private fun gelCategory(t: String?) = when (t?.lowercase()) {
-        "artist" -> TagCategory.ARTIST
-        "character" -> TagCategory.CHARACTER
-        "copyright" -> TagCategory.COPYRIGHT
-        "metadata", "meta" -> TagCategory.META
-        "general", "tag" -> TagCategory.GENERAL
+        "artist", "1" -> TagCategory.ARTIST
+        "character", "4" -> TagCategory.CHARACTER
+        "copyright", "3" -> TagCategory.COPYRIGHT
+        "metadata", "meta", "5" -> TagCategory.META
+        "general", "tag", "0" -> TagCategory.GENERAL
         null, "" -> null
         else -> TagCategory.OTHER
+    }
+
+    /** Rule34, Safebooru and Xbooru send `tag_info` ({"tag", "type"}) when asked with `fields=tag_info`. */
+    private fun gelTagInfo(el: JsonElement?): Map<String, TagCategory>? {
+        val arr = el as? JsonArray ?: return null
+        return arr.mapNotNull { it as? JsonObject }.mapNotNull { e ->
+            val name = e.str("tag") ?: e.str("name") ?: return@mapNotNull null
+            name to (gelCategory(e.str("type")) ?: TagCategory.GENERAL)
+        }.toMap().ifEmpty { null }
+    }
+
+    private fun groupTags(tags: List<String>, types: Map<String, TagCategory>): Map<TagCategory, List<String>> =
+        tags.groupBy { types[it] ?: types[it.lowercase()] ?: TagCategory.GENERAL }.toSortedMap(compareBy { it.ordinal })
+
+    // Gelbooru.com has no tag_info, so types come from its tag API. Shared across searches; LRU-bounded.
+    private val tagTypeCache = object : LinkedHashMap<String, TagCategory>(512, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, TagCategory>) = size > 20_000
+    }
+
+    private fun needsTypeLookup(source: Source) = source.type == ApiType.GELBOORU && source.host.contains("gelbooru.com")
+
+    /**
+     * Fills in tag categories (so the artist is known) for posts that arrived as flat tag lists.
+     * Known tags come from the cache; the rest are fetched 100 at a time. Posts that already have
+     * categories, or come from sites without a tag API, are returned unchanged.
+     */
+    suspend fun withTagTypes(source: Source, posts: List<Post>): List<Post> {
+        if (!needsTypeLookup(source) || posts.none { it.tagGroups == null }) return posts
+        val wanted = posts.filter { it.tagGroups == null }.flatMap { it.tags }.map { it.lowercase() }.toSet()
+        val missing = synchronized(tagTypeCache) { wanted.filter { it !in tagTypeCache } }
+        for (chunk in missing.chunked(100)) {
+            val url = "${source.apiUrl}/index.php?page=dapi&s=tag&q=index&json=1&limit=100&names=${enc(chunk.joinToString(" "))}" + gelAuth(source)
+            val root = runCatching { AppJson.parseToJsonElement(get(source, url)) }.getOrNull()
+            val entries = when (root) {
+                is JsonObject -> (root["tag"] as? JsonArray) ?: (root["tag"] as? JsonObject)?.let { JsonArray(listOf(it)) }
+                is JsonArray -> root
+                else -> null
+            } ?: continue
+            synchronized(tagTypeCache) {
+                entries.mapNotNull { it as? JsonObject }.forEach { e ->
+                    val name = e.str("name")?.lowercase() ?: return@forEach
+                    tagTypeCache[name] = gelCategory(e.str("type")) ?: TagCategory.GENERAL
+                }
+                chunk.forEach { if (it !in tagTypeCache) tagTypeCache[it] = TagCategory.GENERAL }
+            }
+        }
+        val types = synchronized(tagTypeCache) { wanted.associateWith { tagTypeCache[it] ?: TagCategory.GENERAL } }
+        return posts.map { p -> if (p.tagGroups != null) p else p.copy(tagGroups = groupTags(p.tags, types)) }
     }
 
     private fun parseGelDate(s: String): Long? =

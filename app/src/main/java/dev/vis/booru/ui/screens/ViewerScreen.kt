@@ -321,6 +321,13 @@ private fun InfoSheet(post: Post, searchQuery: String?, onDismiss: () -> Unit, o
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val dark = isDarkScheme()
+    // Gelbooru.com only sends flat tags; look up their types so artists and characters group properly.
+    var typed by remember(post.key) { mutableStateOf(post) }
+    LaunchedEffect(post.key) {
+        if (post.tagGroups == null) Graph.sources.get(post.sourceId)?.let { s ->
+            typed = runCatching { Graph.api.withTagTypes(s, listOf(post)).first() }.getOrDefault(post)
+        }
+    }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 32.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -359,7 +366,7 @@ private fun InfoSheet(post: Post, searchQuery: String?, onDismiss: () -> Unit, o
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             val groups: List<Pair<TagCategory?, List<String>>> =
-                post.tagGroups?.map { it.key to it.value } ?: listOf(null to post.tags)
+                typed.tagGroups?.map { it.key to it.value } ?: listOf(null to typed.tags)
             groups.forEach { (cat, tags) ->
                 if (cat != null) {
                     Text(cat.label, style = MaterialTheme.typography.titleSmall, color = tagColor(cat, dark), modifier = Modifier.padding(top = 14.dp, bottom = 6.dp))

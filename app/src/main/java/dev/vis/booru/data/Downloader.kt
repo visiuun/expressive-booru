@@ -20,9 +20,9 @@ import kotlinx.coroutines.launch
 
 /**
  * Saves originals through the system DownloadManager into Downloads/Expressive Booru.
- * Name: "[artist] - <original filename>_<platform>.<ext>",.
- * Artist is "unknown" on sites whose API doesn't say which tag is the artist (Gelbooru-type sites),
- * unless the caller knows it (bulk downloads of a single-tag search pass that tag).
+ * Name: "[artist] - <original filename>_<platform>.<ext>", or just "<original filename>_<platform>.<ext>"
+ * when the site can't tell which tag is the artist (TBIB, HypnoHub). A single-tag bulk download passes
+ * its tag as the artist for those.
  */
 object Downloader {
 
@@ -33,8 +33,8 @@ object Downloader {
         val base = sanitize(original.substringBeforeLast('.', original)).ifBlank { post.md5 ?: post.id.toString() }
         val artist = post.artists.take(2).joinToString(", ") { sanitize(it) }
             .ifBlank { artistHint?.let(::sanitize).orEmpty() }
-            .ifBlank { "unknown" }
-        return "[$artist] - ${base}_$platform.$ext"
+        val name = "${base}_$platform.$ext"
+        return if (artist.isBlank()) name else "[$artist] - $name"
     }
 
     private fun sanitize(s: String): String = s.replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "_").trim().take(80)
@@ -60,13 +60,20 @@ object Downloader {
         return name
     }
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    /** Looks up the post's tag types first where the site only gives flat tags, so the artist is in the name. */
     fun download(context: Context, post: Post) {
         val app = context.applicationContext
-        try {
-            val name = enqueue(app, post)
-            Toast.makeText(app, "Downloading $name", Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) {
-            Toast.makeText(app, "Download failed: ${e.message}", Toast.LENGTH_LONG).show()
+        scope.launch {
+            val typed = Graph.sources.get(post.sourceId)
+                ?.let { s -> runCatching { Graph.api.withTagTypes(s, listOf(post)).first() }.getOrNull() } ?: post
+            try {
+                val name = enqueue(app, typed)
+                Toast.makeText(app, "Downloading $name", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(app, "Download failed: ${e.message}", Toast.LENGTH_LONG).show()
+            }
         }
     }
 }
@@ -113,6 +120,7 @@ object BulkDownloader {
                 var page = 0
                 while (seen < MAX_POSTS) {
                     val batch = fetchWithRetry(source, query, page)
+                        .let { b -> runCatching { Graph.api.withTagTypes(source, b) }.getOrDefault(b) }
                     if (batch.isEmpty()) break
                     for (post in batch) {
                         if (seen >= MAX_POSTS) break

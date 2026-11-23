@@ -79,7 +79,7 @@ Tag names use underscores instead of spaces. Each site has its own tag names (`c
 - **A grid that keeps each image's shape**, 1 to 5 columns, and endless scrolling. Long-press any thumbnail to favorite it
 - **Full-screen viewer**: swipe through results (more load as you go), pinch and double-tap to zoom, **GIFs** and **videos** (webm, mp4) play inline, full-resolution or resized images
 - **Post details**: score, size, date, source link and tags grouped by type. Tap a tag to search it, or long-press it to add it to the current search, exclude it, blacklist it or copy it
-- **Download** single posts or **download everything** from a search (up to 3,000 posts), straight to your Downloads folder, named `[artist] - filename_site.ext`. Already downloaded posts are skipped next time
+- **Download** single posts or **download everything** from a search (up to 3,000 posts), straight to your Downloads folder, named `[artist] - filename_site.ext` (just `filename_site.ext` when the site doesn't say who the artist is). Already downloaded posts are skipped next time
 - **Favorites** across every site, kept on your phone, filterable by site and tags
 - **Saved searches** and search history
 - **Content filters**: choose which ratings you see (General, Sensitive, Questionable, Explicit), blacklist tags, and blur NSFW thumbnails
